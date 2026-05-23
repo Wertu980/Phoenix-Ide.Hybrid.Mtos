@@ -1,0 +1,6 @@
+{
+  "name": "Hybrid IDE",
+  "description": "An interactive hybrid development environment of Android Studio & VS Code in Kotlin, with simulated emulators, interactive workspaces, compiled run previews, local database file backup and a server-side Gemini AI Copilot.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
