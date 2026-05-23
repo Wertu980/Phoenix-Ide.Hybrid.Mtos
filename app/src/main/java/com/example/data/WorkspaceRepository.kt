@@ -346,7 +346,7 @@ fun App() {
         promptText = ""
         
         // Mocking responses since API layer runs on the server side in the main framework
-        messages.add(ChatMessage("Checking dependencies and compiling prompt. That's a great KMP concept: '${'$'}{text}'!", false))
+        messages.add(ChatMessage("Checking dependencies and compiling prompt. That's a great KMP concept!", false))
     }
 
     Column(
@@ -498,7 +498,7 @@ class Greeting {
     private val platform = getPlatform()
 
     fun greet(): String {
-        return "Hello World! Compiled on platform: ${'$'}{platform.name}"
+        return "Hello World! Compiled on platform: " + platform.name
     }
 }"""
                 ))

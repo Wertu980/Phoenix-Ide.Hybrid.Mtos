@@ -1,0 +1,14 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="24"
+    android:viewportHeight="24">
+    <!-- Top Chevron (Light Cyan) -->
+    <path
+        android:fillColor="#54C5F8"
+        android:pathData="M14.314,0 L2.3,12 L6,15.7 L21.684,0.013 h-7.357 Z" />
+    <!-- Bottom Chevron (Navy Blue) -->
+    <path
+        android:fillColor="#02569B"
+        android:pathData="M14.328,11.072 L7.857,17.53 L14.327,24 L21.7,24 L15.24,17.532 L21.7,11.072 h-7.372 Z" />
+</vector>
