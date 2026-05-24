@@ -67,6 +67,12 @@ class IdeViewModel(private val repository: WorkspaceRepository) : ViewModel() {
     private val _emulatorPlatform = MutableStateFlow("android") // "android", "ios"
     val emulatorPlatform: StateFlow<String> = _emulatorPlatform.asStateFlow()
 
+    private val _isCloudCompilerEnabled = MutableStateFlow(false)
+    val isCloudCompilerEnabled: StateFlow<Boolean> = _isCloudCompilerEnabled.asStateFlow()
+
+    private val _cloudCompilerServerUrl = MutableStateFlow("https://compiler.phoenixide.com/api/compile")
+    val cloudCompilerServerUrl: StateFlow<String> = _cloudCompilerServerUrl.asStateFlow()
+
     private val _buildStatus = MutableStateFlow<BuildStatus>(BuildStatus.Idle)
     val buildStatus: StateFlow<BuildStatus> = _buildStatus.asStateFlow()
 
@@ -89,6 +95,8 @@ class IdeViewModel(private val repository: WorkspaceRepository) : ViewModel() {
             repository.getSetting("layout_mode")?.let { _ideLayoutMode.value = it }
             repository.getSetting("theme")?.let { _ideTheme.value = it }
             repository.getSetting("platform")?.let { _emulatorPlatform.value = it }
+            repository.getSetting("cloud_compiler_enabled")?.let { _isCloudCompilerEnabled.value = it.toBoolean() }
+            repository.getSetting("cloud_compiler_url")?.let { _cloudCompilerServerUrl.value = it }
         }
     }
 
@@ -218,6 +226,16 @@ class IdeViewModel(private val repository: WorkspaceRepository) : ViewModel() {
         viewModelScope.launch { repository.saveSetting("platform", platform) }
     }
 
+    fun setCloudCompilerEnabled(enabled: Boolean) {
+        _isCloudCompilerEnabled.value = enabled
+        viewModelScope.launch { repository.saveSetting("cloud_compiler_enabled", enabled.toString()) }
+    }
+
+    fun setCloudCompilerUrl(url: String) {
+        _cloudCompilerServerUrl.value = url
+        viewModelScope.launch { repository.saveSetting("cloud_compiler_url", url) }
+    }
+
     fun updateCopilotPrompt(prompt: String) {
         _copilotPrompt.value = prompt
     }
@@ -242,38 +260,90 @@ class IdeViewModel(private val repository: WorkspaceRepository) : ViewModel() {
                 _terminalLogs.value = _terminalLogs.value + s
             }
 
-            if (isFlutter) {
-                appendLog("> flutter run -d ${if (_emulatorPlatform.value == "android") "android-x64-emulator" else "ios-pro-simulator"}")
-                delay(600)
-                appendLog("Launching lib/main.dart on ${if (_emulatorPlatform.value == "android") "Android SDK Screen" else "iOS SDK Screen"} in debug mode...")
-                delay(500)
-                appendLog("✓ Running 'flutter pub get'...")
-                delay(600)
-                appendLog("Running Gradle task 'assembleDebug'...")
-                delay(500)
-                appendLog("✓ Built build/app/outputs/flutter-apk/app-debug.apk (18.6MB).")
-                delay(400)
-                appendLog("Installing app-debug.apk onto simulated mobile frame...")
-                delay(500)
-                appendLog("Syncing files to device via hot reload... Press \"r\" to reload.")
-            } else {
-                appendLog("> ./gradlew :app:assembleDebug")
-                delay(600)
-                appendLog("Starting a Gradle Daemon, 1 incompatible Daemon could not be reused... [0.2s]")
-                delay(500)
-                appendLog("> :app:preBuild UP-TO-DATE")
-                appendLog("> :app:preDebugBuild UP-TO-DATE")
-                delay(400)
-                appendLog("> :app:compileDebugKotlin SUCCESS [1.1s]")
-                delay(400)
-                appendLog("> :app:processDebugResources SUCCESS [0.3s]")
-                delay(300)
-                appendLog("> :app:assembleDebug SUCCESS [1.8s]")
-                delay(400)
-                appendLog("Launching ${active?.name ?: "AndroidApp"} on simulated ${if (_emulatorPlatform.value == "android") "Android Tablet" else "iOS Phone"} screen inside split chassis view...")
-            }
+            if (_isCloudCompilerEnabled.value) {
+                val serverUrl = _cloudCompilerServerUrl.value.trim()
+                appendLog("> Cloud Compile Engine connecting to: $serverUrl")
+                appendLog("Assembling and packaging workspace local client files...")
+                
+                val rawFiles = _workspaceFiles.value.filter { !it.isDirectory }
+                appendLog("Packaging ${rawFiles.size} client files code structure...")
+                
+                val compileFileList = rawFiles.map { f ->
+                    com.mtos.phoenix.ide.hybrid.network.CompileFile(
+                        path = f.filePath,
+                        content = f.content
+                    )
+                }
 
-            _buildStatus.value = BuildStatus.Success
+                val request = com.mtos.phoenix.ide.hybrid.network.CompileRequest(
+                    projectName = active?.name ?: "HybridProject",
+                    templateType = active?.templateType ?: "Android Template",
+                    files = compileFileList,
+                    targetPlatform = _emulatorPlatform.value
+                )
+
+                try {
+                    val result = com.mtos.phoenix.ide.hybrid.network.CompilerApiClient.service.compileProject(serverUrl, request)
+                    if (result.success) {
+                        appendLog("[SUCCESS] Remote server compiled package successfully! ✅")
+                        if (!result.downloadUrl.isNullOrEmpty()) {
+                            appendLog("Download Link / APK URL: ${result.downloadUrl}")
+                        }
+                        if (result.logs.isNotEmpty()) {
+                            val cleanLogs = result.logs.lines()
+                            cleanLogs.forEach { appendLog(it) }
+                        }
+                        _buildStatus.value = BuildStatus.Success
+                    } else {
+                        appendLog("[ERROR] Remote package build failed! ❌")
+                        if (!result.error.isNullOrEmpty()) {
+                            appendLog("Server Error: ${result.error}")
+                        }
+                        if (result.logs.isNotEmpty()) {
+                            val cleanLogs = result.logs.lines()
+                            cleanLogs.forEach { appendLog(it) }
+                        }
+                        _buildStatus.value = BuildStatus.Error(result.logs)
+                    }
+                } catch (e: Exception) {
+                    appendLog("[ERROR] Failed to establish connection to: $serverUrl")
+                    appendLog("Connection Error trace: ${e.localizedMessage}")
+                    appendLog("Suggestion: Confirm your backend compile server is running and accepting POST requests, or fallback to local simulated device compilation.")
+                    _buildStatus.value = BuildStatus.Error(e.localizedMessage ?: "Connection Failure")
+                }
+            } else {
+                if (isFlutter) {
+                    appendLog("> flutter run -d ${if (_emulatorPlatform.value == "android") "android-x64-emulator" else "ios-pro-simulator"}")
+                    delay(600)
+                    appendLog("Launching lib/main.dart on ${if (_emulatorPlatform.value == "android") "Android SDK Screen" else "iOS SDK Screen"} in debug mode...")
+                    delay(500)
+                    appendLog("✓ Running 'flutter pub get'...")
+                    delay(600)
+                    appendLog("Running Gradle task 'assembleDebug'...")
+                    delay(500)
+                    appendLog("✓ Built build/app/outputs/flutter-apk/app-debug.apk (18.6MB).")
+                    delay(400)
+                    appendLog("Installing app-debug.apk onto simulated mobile frame...")
+                    delay(500)
+                    appendLog("Syncing files to device via hot reload... Press \"r\" to reload.")
+                } else {
+                    appendLog("> ./gradlew :app:assembleDebug")
+                    delay(600)
+                    appendLog("Starting a Gradle Daemon, 1 incompatible Daemon could not be reused... [0.2s]")
+                    delay(500)
+                    appendLog("> :app:preBuild UP-TO-DATE")
+                    appendLog("> :app:preDebugBuild UP-TO-DATE")
+                    delay(400)
+                    appendLog("> :app:compileDebugKotlin SUCCESS [1.1s]")
+                    delay(400)
+                    appendLog("> :app:processDebugResources SUCCESS [0.3s]")
+                    delay(300)
+                    appendLog("> :app:assembleDebug SUCCESS [1.8s]")
+                    delay(400)
+                    appendLog("Launching ${active?.name ?: "AndroidApp"} on simulated ${if (_emulatorPlatform.value == "android") "Android Tablet" else "iOS Phone"} screen inside split chassis view...")
+                }
+                _buildStatus.value = BuildStatus.Success
+            }
         }
     }
 

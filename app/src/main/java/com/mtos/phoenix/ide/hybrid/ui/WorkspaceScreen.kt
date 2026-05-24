@@ -48,9 +48,13 @@ fun WorkspaceScreen(
     val geminiStatus by viewModel.geminiStatus.collectAsState()
     val copilotPrompt by viewModel.copilotPrompt.collectAsState()
 
+    val isCloudCompilerEnabled by viewModel.isCloudCompilerEnabled.collectAsState()
+    val cloudCompilerServerUrl by viewModel.cloudCompilerServerUrl.collectAsState()
+
     var showFileExplorer by remember { mutableStateOf(true) }
     var showTerminalLogs by remember { mutableStateOf(true) }
     var showEmulatorPreview by remember { mutableStateOf(true) }
+    var showSettingsDialog by remember { mutableStateOf(false) }
 
     val scope = rememberCoroutineScope()
 
@@ -134,6 +138,13 @@ fun WorkspaceScreen(
                             imageVector = Icons.Default.Phone,
                             tint = if (showEmulatorPreview) MaterialTheme.colorScheme.primary else Color.Gray,
                             contentDescription = "Toggle Device Screen"
+                        )
+                    }
+                    IconButton(onClick = { showSettingsDialog = !showSettingsDialog }) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            tint = if (showSettingsDialog) MaterialTheme.colorScheme.primary else Color.Gray,
+                            contentDescription = "Engine Core Settings"
                         )
                     }
                 },
@@ -515,5 +526,133 @@ fun WorkspaceScreen(
                 }
             }
         }
+    }
+
+    if (showSettingsDialog) {
+        var localUrlInput by remember { mutableStateOf(cloudCompilerServerUrl) }
+        
+        AlertDialog(
+            onDismissRequest = { showSettingsDialog = false },
+            title = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(
+                        imageVector = Icons.Default.Settings,
+                        contentDescription = "Settings",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text("Compiler Server & Engine Settings", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                }
+            },
+            text = {
+                Column(
+                    verticalArrangement = Arrangement.spacedBy(16.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .verticalScroll(rememberScrollState())
+                ) {
+                    Text(
+                        text = "Choose whether your code package is built using real servers or simulated core on device.",
+                        fontSize = 12.sp,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                    )
+                    
+                    Divider(color = Color.Gray.copy(alpha = 0.2f))
+                    
+                    // Toggle option for Remote Cloud Compiler server
+                    Column {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text("Remote Compiler Server", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                Text("Send codebase directly to an online compiler server", fontSize = 11.sp, color = Color.Gray)
+                            }
+                            Switch(
+                                checked = isCloudCompilerEnabled,
+                                onCheckedChange = { viewModel.setCloudCompilerEnabled(it) }
+                            )
+                        }
+                    }
+                    
+                    if (isCloudCompilerEnabled) {
+                        // Compiler API endpoint input field
+                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text("Compiler API URL Endpoint", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            OutlinedTextField(
+                                value = localUrlInput,
+                                onValueChange = { 
+                                    localUrlInput = it
+                                    viewModel.setCloudCompilerUrl(it) 
+                                },
+                                textStyle = TextStyle(fontSize = 12.sp),
+                                placeholder = { Text("https://compiler.yourdomain.com/compile", fontSize = 11.sp) },
+                                modifier = Modifier.fillMaxWidth(),
+                                singleLine = true
+                            )
+                            Text(
+                                text = "Your package server configuration must parse compiler request structures carrying the file list payload successfully.",
+                                fontSize = 10.sp,
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
+                            )
+                        }
+                    } else {
+                        // Local simulation core active notice info
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(8.dp))
+                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                .padding(12.dp)
+                        ) {
+                            Row(
+                                verticalAlignment = Alignment.Top, 
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Text(
+                                    text = "Local simulation core is active. Clicking RUN compiles the hot-reload mockup immediately inside the split-screen frame without remote connections.",
+                                    fontSize = 11.sp,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                )
+                            }
+                        }
+                    }
+                    
+                    Divider(color = Color.Gray.copy(alpha = 0.2f))
+                    
+                    // Device target platform custom chips
+                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                        Text("Default Preview Platform", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf("android" to "Android Emulation", "ios" to "iOS Emulation").forEach { (platformId, label) ->
+                                val selected = emulatorPlatform == platformId
+                                FilterChip(
+                                    selected = selected,
+                                    onClick = { viewModel.setEmulatorPlatform(platformId) },
+                                    label = { Text(label, fontSize = 11.sp) }
+                                )
+                            }
+                        }
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showSettingsDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                ) {
+                    Text("Close", fontWeight = FontWeight.Bold)
+                }
+            }
+        )
     }
 }

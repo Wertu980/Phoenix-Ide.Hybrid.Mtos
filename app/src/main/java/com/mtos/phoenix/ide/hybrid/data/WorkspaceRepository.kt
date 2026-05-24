@@ -361,8 +361,141 @@ class WorkspaceRepository(
             // Copy recursively from templates/android assets
             copyAssetFolder("templates/android", rootDir, replacements)
 
+            // Core Robust Fallback check if assets did not copy anything
+            val appDir = File(rootDir, "app")
+            val srcDir = File(appDir, "src/main/java/${packageName.replace('.', '/')}")
+            if (!srcDir.exists() || srcDir.listFiles().isNullOrEmpty()) {
+                srcDir.mkdirs()
+                
+                // 1. Create MainActivity.kt
+                if (templateType.contains("Calculator", ignoreCase = true)) {
+                    File(srcDir, "MainActivity.kt").writeText("""
+package $packageName
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.unit.dp
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            Surface(
+                modifier = Modifier.fillMaxSize(),
+                color = Color(0xFF1E1E2E)
+            ) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(
+                        text = "Android Composite Calculator Screen",
+                        color = Color.White
+                    )
+                }
+            }
+        }
+    }
+}
+                    """.trimIndent().trim())
+                } else {
+                    File(srcDir, "MainActivity.kt").writeText("""
+package $packageName
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
+import androidx.compose.foundation.layout.*
+import androidx.compose.material3.*
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+
+class MainActivity : ComponentActivity() {
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        setContent {
+            Surface(modifier = Modifier.fillMaxSize()) {
+                Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                    Text(text = "Welcome to ${project.name}!")
+                }
+            }
+        }
+    }
+}
+                    """.trimIndent().trim())
+                }
+
+                // 2. Create strings.xml
+                val resDir = File(appDir, "src/main/res/values")
+                resDir.mkdirs()
+                File(resDir, "strings.xml").writeText("""
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">${project.name}</string>
+</resources>
+                """.trimIndent().trim())
+
+                // 3. Create AndroidManifest.xml
+                val mainDir = File(appDir, "src/main")
+                mainDir.mkdirs()
+                File(mainDir, "AndroidManifest.xml").writeText("""
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="$packageName">
+    <application
+        android:label="${project.name}"
+        android:theme="@android:style/Theme.Material.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+                """.trimIndent().trim())
+
+                // 4. Create build.gradle.kts
+                File(appDir, "build.gradle.kts").writeText("""
+plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+android {
+    namespace = "$packageName"
+    compileSdk = $targetSdk
+    defaultConfig {
+        applicationId = "$packageName"
+        minSdk = 24
+        targetSdk = $targetSdk
+        versionCode = 1
+        versionName = "1.0"
+    }
+}
+dependencies {
+    implementation("androidx.core:core-ktx:1.12.0")
+    implementation("androidx.compose.ui:ui:1.6.0")
+    implementation("androidx.compose.material3:material3:1.2.0")
+}
+                """.trimIndent().trim())
+
+                // 5. Create settings.gradle.kts
+                File(rootDir, "settings.gradle.kts").writeText("""
+rootProject.name = "${project.name}"
+include(":app")
+                """.trimIndent().trim())
+            }
+
         } else {
-            // Flutter Project Creation using templates/flutter assets
+            // Flutter Project Creation
             var orgName = "com.mtos.phoenix.ide.hybrid"
             val orgRegex = """Org:\s*([a-zA-Z0-9._]+)""".toRegex()
             orgRegex.find(templateType)?.let {
@@ -380,6 +513,112 @@ class WorkspaceRepository(
 
             // Copy recursively from templates/flutter assets
             copyAssetFolder("templates/flutter", rootDir, replacements)
+
+            // Robust Fallback check if copyAssetFolder produced no files
+            val libDir = File(rootDir, "lib")
+            if (!libDir.exists() || libDir.listFiles().isNullOrEmpty()) {
+                libDir.mkdirs()
+
+                // 1. Create main.dart
+                File(libDir, "main.dart").writeText("""
+import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: '${project.name}',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
+        useMaterial3: true,
+      ),
+      home: const MyHomePage(title: '${project.name} Home Page'),
+    );
+  }
+}
+
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({super.key, required this.title});
+  final String title;
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  int _counter = 0;
+
+  void _incrementCounter() {
+    setState(() {
+      _counter++;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        backgroundColor: Theme.of(context).colorScheme.inversePrimary,
+        title: Text(widget.title),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text(
+              'You have pushed the button this many times:',
+            ),
+            Text(
+              '${'$'}_counter',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: _incrementCounter,
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+                """.trimIndent().trim())
+
+                // 2. Create pubspec.yaml
+                File(rootDir, "pubspec.yaml").writeText("""
+name: $appNameLower
+description: A new Flutter project generated in Phoenix IDE.
+version: 1.0.0+1
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.6
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+flutter:
+  uses-material-design: true
+                """.trimIndent().trim())
+
+                // 3. Create README.md
+                File(rootDir, "README.md").writeText("""
+# $appNameLower
+
+A new Flutter template project created with Phoenix IDE Studio.
+
+## Getting Started
+This project is fully ready for split-screen emulator previewing, code modification, and server compiles.
+                """.trimIndent().trim())
+            }
 
             // Create placeholder extra folders if necessary
             val pList = mutableListOf<String>()
