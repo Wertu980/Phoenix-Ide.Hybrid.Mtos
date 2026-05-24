@@ -46,16 +46,6 @@ fun TemplateScreen(
     var flutterOrgName by remember { mutableStateOf("com.mtos.phoenix.ide.hybrid.flutterapp") }
     var selectedPlatforms by remember { mutableStateOf(setOf("Android", "iOS", "Web")) }
 
-    // Synchronize package namespace suggestions as user customizes the project title
-    LaunchedEffect(newProjectName) {
-        val cleanName = newProjectName.lowercase()
-            .replace(Regex("[^a-z0-9]"), "")
-        if (cleanName.isNotBlank()) {
-            androidPackageName = "com.mtos.phoenix.ide.hybrid.$cleanName"
-            flutterOrgName = "com.mtos.phoenix.ide.hybrid.$cleanName"
-        }
-    }
-
     Scaffold(
         topBar = {
             TopAppBar(

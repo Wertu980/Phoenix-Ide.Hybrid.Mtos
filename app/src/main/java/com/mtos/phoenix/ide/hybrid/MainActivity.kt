@@ -19,11 +19,13 @@ import com.mtos.phoenix.ide.hybrid.data.AppDatabase
 import com.mtos.phoenix.ide.hybrid.data.WorkspaceRepository
 import com.mtos.phoenix.ide.hybrid.ui.HomeScreen
 import com.mtos.phoenix.ide.hybrid.ui.TemplateScreen
+import com.mtos.phoenix.ide.hybrid.ui.WorkspaceScreen
 import com.mtos.phoenix.ide.hybrid.viewmodel.IdeViewModel
 
 enum class AppScreen {
     Home,
-    Templates
+    Templates,
+    Workspace
 }
 
 class MainActivity : ComponentActivity() {
@@ -32,7 +34,7 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val database = AppDatabase.getDatabase(applicationContext)
-        val repository = WorkspaceRepository(database.workspaceDao())
+        val repository = WorkspaceRepository(applicationContext, database.workspaceDao())
         val factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
@@ -63,11 +65,16 @@ class MainActivity : ComponentActivity() {
                         when (screen) {
                             AppScreen.Home -> HomeScreen(
                                 viewModel = viewModel,
-                                onOpenTemplates = { currentScreen = AppScreen.Templates }
+                                onOpenTemplates = { currentScreen = AppScreen.Templates },
+                                onOpenProject = { currentScreen = AppScreen.Workspace }
                             )
                             AppScreen.Templates -> TemplateScreen(
                                 viewModel = viewModel,
                                 onBack = { currentScreen = AppScreen.Home }
+                            )
+                            AppScreen.Workspace -> WorkspaceScreen(
+                                viewModel = viewModel,
+                                onBackToHome = { currentScreen = AppScreen.Home }
                             )
                         }
                     }

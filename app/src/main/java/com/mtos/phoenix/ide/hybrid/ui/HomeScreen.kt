@@ -30,7 +30,8 @@ import com.mtos.phoenix.ide.hybrid.viewmodel.IdeViewModel
 @Composable
 fun HomeScreen(
     viewModel: IdeViewModel,
-    onOpenTemplates: () -> Unit
+    onOpenTemplates: () -> Unit,
+    onOpenProject: () -> Unit
 ) {
     val projects by viewModel.projects.collectAsState()
     var projectToDelete by remember { mutableStateOf<Project?>(null) }
@@ -160,7 +161,10 @@ fun HomeScreen(
                     items(projects) { project ->
                         ProjectCard(
                             project = project,
-                            onCardClick = { selectedProjectForDetails = project },
+                            onCardClick = {
+                                viewModel.selectProject(project)
+                                onOpenProject()
+                            },
                             onDeleteClick = { projectToDelete = project }
                         )
                     }

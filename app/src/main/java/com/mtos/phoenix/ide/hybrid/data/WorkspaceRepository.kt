@@ -1,74 +1,324 @@
 package com.mtos.phoenix.ide.hybrid.data
 
+import android.content.Context
+import android.os.Environment
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.firstOrNull
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import java.io.File
 
-class WorkspaceRepository(private val workspaceDao: WorkspaceDao) {
+class WorkspaceRepository(
+    private val context: Context,
+    private val workspaceDao: WorkspaceDao
+) {
 
-    val allProjects: Flow<List<Project>> = workspaceDao.getAllProjects()
+    private val _allProjectsFlow = MutableStateFlow<List<Project>>(emptyList())
+    val allProjects: Flow<List<Project>> = _allProjectsFlow.asStateFlow()
 
-    fun getFilesByProject(projectId: Int): Flow<List<WorkspaceFile>> =
-        workspaceDao.getFilesByProject(projectId)
+    // Map of projectId to files list Flow to dynamically update editor and file trees
+    private val filesFlowMap = mutableMapOf<Int, MutableStateFlow<List<WorkspaceFile>>>()
 
-    suspend fun getFileByPath(projectId: Int, filePath: String): WorkspaceFile? =
-        workspaceDao.getFileByPath(projectId, filePath)
+    init {
+        _allProjectsFlow.value = readProjects()
+    }
+
+    private val rootDir: File
+        get() {
+            // Priority 1: Check standard external storage if it is already writeable/granted
+            try {
+                val base = File("/storage/emulated/0")
+                if (base.exists() && base.canWrite()) {
+                    return base
+                }
+                val envBase = Environment.getExternalStorageDirectory()
+                if (envBase.exists() && envBase.canWrite()) {
+                    return envBase
+                }
+            } catch (e: Exception) {
+                // Ignore and proceed to safe directories
+            }
+
+            // Priority 2: Use external app-specific sandbox storage (always allowed and writeable, no permissions needed)
+            val extDir = context.getExternalFilesDir(null)
+            if (extDir != null) {
+                val safeExternal = File(extDir, "PhoenixIDE")
+                if (!safeExternal.exists()) {
+                    safeExternal.mkdirs()
+                }
+                if (safeExternal.exists() && safeExternal.canWrite()) {
+                    return safeExternal
+                }
+            }
+
+            // Priority 3: Fall back to secure internal app storage (always writeable and safe, no permissions needed)
+            val safeInternal = File(context.filesDir, "PhoenixIDE")
+            if (!safeInternal.exists()) {
+                safeInternal.mkdirs()
+            }
+            return safeInternal
+        }
+
+    private val projectsFile: File
+        get() = File(rootDir, ".phoenix_projects.txt")
+
+    private val settingsFile: File
+        get() = File(rootDir, ".phoenix_settings.txt")
+
+    // CSV format storage helper for Projects
+    private fun readProjects(): List<Project> {
+        val file = projectsFile
+        if (!file.exists()) return emptyList()
+        return try {
+            file.readLines().mapNotNull { line ->
+                val tokens = line.split("|")
+                if (tokens.size >= 3) {
+                    Project(
+                        id = tokens[0].toIntOrNull() ?: 0,
+                        name = tokens[1],
+                        templateType = tokens[2],
+                        createdAt = tokens.getOrNull(3)?.toLongOrNull() ?: System.currentTimeMillis()
+                    )
+                } else null
+            }
+        } catch (e: Exception) {
+            emptyList()
+        }
+    }
+
+    private fun writeProjects(projects: List<Project>) {
+        try {
+            val file = projectsFile
+            val parent = file.parentFile
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs()
+            }
+            val content = projects.joinToString("\n") { p ->
+                "${p.id}|${p.name}|${p.templateType}|${p.createdAt}"
+            }
+            file.writeText(content)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    // Key Value storage helper for Settings
+    private fun readSettings(): Map<String, String> {
+        val file = settingsFile
+        if (!file.exists()) return emptyMap()
+        return try {
+            file.readLines().mapNotNull { line ->
+                val idx = line.indexOf('=')
+                if (idx != -1) {
+                    line.substring(0, idx) to line.substring(idx + 1)
+                } else null
+            }.toMap()
+        } catch (e: Exception) {
+            emptyMap()
+        }
+    }
+
+    private fun writeSettings(settings: Map<String, String>) {
+        try {
+            val file = settingsFile
+            val parent = file.parentFile
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs()
+            }
+            val content = settings.entries.joinToString("\n") { "${it.key}=${it.value}" }
+            file.writeText(content)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+    }
+
+    private fun getProjectDir(project: Project): File {
+        val cleanName = project.name.replace(Regex("[^a-zA-Z0-9_ -]"), "").trim()
+        return File(rootDir, cleanName)
+    }
+
+    fun getFilesByProject(projectId: Int): Flow<List<WorkspaceFile>> {
+        val flow = filesFlowMap.getOrPut(projectId) { MutableStateFlow(emptyList()) }
+        refreshFilesForProject(projectId)
+        return flow.asStateFlow()
+    }
+
+    private fun refreshFilesForProject(projectId: Int) {
+        val project = readProjects().firstOrNull { it.id == projectId } ?: return
+        val flow = filesFlowMap.getOrPut(projectId) { MutableStateFlow(emptyList()) }
+        val dir = getProjectDir(project)
+        if (dir.exists()) {
+            val list = mutableListOf<WorkspaceFile>()
+            var idCounter = 1
+
+            fun walk(currentFile: File, relativePath: String) {
+                val files = currentFile.listFiles() ?: return
+                val sorted = files.sortedWith(compareBy({ !it.isDirectory }, { it.name.lowercase() }))
+                for (f in sorted) {
+                    if (f.name.startsWith(".")) continue
+                    val nextRel = if (relativePath.isEmpty()) f.name else "$relativePath/${f.name}"
+                    if (f.isDirectory) {
+                        list.add(WorkspaceFile(
+                            id = idCounter++,
+                            projectId = projectId,
+                            filePath = nextRel,
+                            content = "",
+                            isDirectory = true
+                        ))
+                        walk(f, nextRel)
+                    } else {
+                        list.add(WorkspaceFile(
+                            id = idCounter++,
+                            projectId = projectId,
+                            filePath = nextRel,
+                            content = try { f.readText() } catch (e: Exception) { "" },
+                            isDirectory = false
+                        ))
+                    }
+                }
+            }
+            walk(dir, "")
+            flow.value = list
+        } else {
+            flow.value = emptyList()
+        }
+    }
+
+    suspend fun getFileByPath(projectId: Int, filePath: String): WorkspaceFile? {
+        val project = readProjects().firstOrNull { it.id == projectId } ?: return null
+        val file = File(getProjectDir(project), filePath)
+        if (file.exists() && file.isFile) {
+            return WorkspaceFile(
+                id = filePath.hashCode(),
+                projectId = projectId,
+                filePath = filePath,
+                content = try { file.readText() } catch (e: Exception) { "" },
+                isDirectory = false
+            )
+        }
+        return null
+    }
 
     suspend fun insertProject(project: Project): Int {
-        val id = workspaceDao.insertProject(project).toInt()
-        createTemplateFiles(id, project.templateType)
-        return id
+        val current = readProjects()
+        val nextId = (current.maxOfOrNull { it.id } ?: 0) + 1
+        val newProj = project.copy(id = nextId)
+        val updated = current + newProj
+        writeProjects(updated)
+        _allProjectsFlow.value = updated
+
+        // Prepare physical dirs and template assets on external storage disk
+        try {
+            createTemplateFilesOnDisk(newProj)
+            refreshFilesForProject(nextId)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
+
+        return nextId
     }
 
     suspend fun deleteProject(projectId: Int) {
-        workspaceDao.deleteProject(projectId)
+        val current = readProjects()
+        val target = current.firstOrNull { it.id == projectId }
+        if (target != null) {
+            val updated = current.filterNot { it.id == projectId }
+            writeProjects(updated)
+            _allProjectsFlow.value = updated
+
+            // Safely delete physical directories recursively if they exist
+            try {
+                val dir = getProjectDir(target)
+                if (dir.exists()) {
+                    dir.deleteRecursively()
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
+
+            filesFlowMap.remove(projectId)
+        }
     }
 
     suspend fun updateFileContent(fileId: Int, newContent: String) {
-        workspaceDao.updateFileContent(fileId, newContent)
+        for ((projId, flow) in filesFlowMap) {
+            val list = flow.value
+            val match = list.firstOrNull { it.id == fileId }
+            if (match != null) {
+                updateFileByPath(projId, match.filePath, newContent)
+                break
+            }
+        }
     }
 
     suspend fun updateFileByPath(projectId: Int, filePath: String, newContent: String) {
-        workspaceDao.updateFileByPath(projectId, filePath, newContent)
+        val project = readProjects().firstOrNull { it.id == projectId } ?: return
+        try {
+            val file = File(getProjectDir(project), filePath)
+            val parent = file.parentFile
+            if (parent != null && !parent.exists()) {
+                parent.mkdirs()
+            }
+            file.writeText(newContent)
+            refreshFilesForProject(projectId)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     suspend fun saveSetting(key: String, value: String) {
-        workspaceDao.saveSetting(IdeSetting(key, value))
+        val current = readSettings().toMutableMap()
+        current[key] = value
+        writeSettings(current)
     }
 
     suspend fun getSetting(key: String): String? {
-        return workspaceDao.getSetting(key)?.value
+        return readSettings()[key]
     }
 
-    private suspend fun createTemplateFiles(projectId: Int, templateType: String) {
-        val files = mutableListOf<WorkspaceFile>()
+    private fun createTemplateFilesOnDisk(project: Project) {
+        val rootDir = getProjectDir(project)
+        if (!rootDir.exists()) {
+            rootDir.mkdirs()
+        }
 
-        when (templateType) {
-            "Compose Multiplatform Calculator" -> {
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/commonMain/kotlin/Calculator.kt",
-                    content = """// Common Math Engine for Android & iOS
-package com.example.shared
+        val templateType = project.templateType
+        if (templateType.contains("Android", ignoreCase = true) || templateType.contains("Calculator", ignoreCase = true)) {
+            var packageName = "com.mtos.phoenix.ide.hybrid.androidapp"
+            var targetSdk = "35"
+            var buildConfigType = "build.gradle.kts"
 
-class Calculator {
-    fun add(a: Double, b: Double): Double = a + b
-    fun subtract(a: Double, b: Double): Double = a - b
-    fun multiply(a: Double, b: Double): Double = a * b
-    fun divide(a: Double, b: Double): Double {
-        if (b == 0.0) throw IllegalArgumentException("Cannot divide by zero")
-        return a / b
-    }
-}"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/commonMain/kotlin/App.kt",
-                    content = """// KMP Compose Multiplatform Shared UI Screen
-package com.example.shared
+            val packageRegex = """Namespace:\s*([a-zA-Z0-9._]+)""".toRegex()
+            packageRegex.find(templateType)?.let {
+                packageName = it.groupValues[1]
+            }
+            val sdkRegex = """API\s*(\2[0-9]|\3[0-9])""".toRegex()
+            sdkRegex.find(templateType)?.let {
+                targetSdk = it.groupValues[1]
+            }
+            if (templateType.contains("build.gradle") && !templateType.contains("build.gradle.kts")) {
+                buildConfigType = "build.gradle"
+            }
 
+            val appDir = File(rootDir, "app")
+            val srcDir = File(appDir, "src/main")
+            val packagePath = packageName.replace('.', '/')
+            val javaDir = File(srcDir, "java/$packagePath")
+            val resDir = File(srcDir, "res/values")
+            val layoutDir = File(srcDir, "res/layout")
+
+            javaDir.mkdirs()
+            resDir.mkdirs()
+            layoutDir.mkdirs()
+
+            // 1. MainActivity.kt
+            val mainActivityFile = File(javaDir, "MainActivity.kt")
+            mainActivityFile.writeText("""package $packageName
+
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.setContent
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
@@ -77,454 +327,26 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-
-@Composable
-fun App() {
-    var display by remember { mutableStateOf("0") }
-    var operand1 by remember { mutableStateOf<Double?>(null) }
-    var activeOp by remember { mutableStateOf<String?>(null) }
-    var isNewNumber by remember { mutableStateOf(true) }
-
-    val calc = remember { Calculator() }
-
-    fun onNumber(num: String) {
-        if (isNewNumber || display == "0") {
-            display = num
-            isNewNumber = false
-        } else {
-            display += num
-        }
-    }
-
-    fun onOp(op: String) {
-        operand1 = display.toDoubleOrNull()
-        activeOp = op
-        isNewNumber = true
-    }
-
-    fun onEqual() {
-        val op1 = operand1 ?: return
-        val op2 = display.toDoubleOrNull() ?: return
-        val op = activeOp ?: return
-
-        try {
-            val result = when (op) {
-                "+" -> calc.add(op1, op2)
-                "-" -> calc.subtract(op1, op2)
-                "×" -> calc.multiply(op1, op2)
-                "÷" -> calc.divide(op1, op2)
-                else -> 0.0
-            }
-            display = if (result % 1.0 == 0.0) result.toInt().toString() else result.toString()
-        } catch (e: Exception) {
-            display = "Error"
-        }
-        operand1 = null
-        activeOp = null
-        isNewNumber = true
-    }
-
-    fun onClear() {
-        display = "0"
-        operand1 = null
-        activeOp = null
-        isNewNumber = true
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF1E1E2E))
-            .padding(16.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        Text(
-            text = "KMP CALCULATOR",
-            color = Color(0xFFA6ADC8),
-            fontSize = 14.sp,
-            fontWeight = FontWeight.Bold,
-            modifier = Modifier.padding(top = 16.dp)
-        )
-
-        // Screen Output
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(110.dp)
-                .background(Color(0xFF11111B), RoundedCornerShape(12.dp))
-                .padding(20.dp),
-            contentAlignment = Alignment.BottomEnd
-        ) {
-            Text(
-                text = display,
-                color = Color(0xFFC9D1D9),
-                fontSize = 42.sp,
-                fontWeight = FontWeight.Bold
-            )
-        }
-
-        // Keypad grid
-        Column(
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            val buttons = listOf(
-                listOf("C", "÷"),
-                listOf("7", "8", "9", "×"),
-                listOf("4", "5", "6", "-"),
-                listOf("1", "2", "3", "+"),
-                listOf("0", "=")
-            )
-
-            buttons.forEach { row ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    row.forEach { char ->
-                        val isOperation = char in listOf("+", "-", "×", "÷", "=")
-                        val isClear = char == "C"
-                        val weight = if (char == "0" || char == "C") 2f else 1f
-
-                        Button(
-                            onClick = {
-                                when {
-                                    isClear -> onClear()
-                                    char == "=" -> onEqual()
-                                    isOperation -> onOp(char)
-                                    else -> onNumber(char)
-                                }
-                            },
-                            colors = ButtonDefaults.buttonColors(
-                                containerColor = when {
-                                    isClear -> Color(0xFFF38BA8)
-                                    isOperation -> Color(0xFFFAB387)
-                                    else -> Color(0xFF313244)
-                                },
-                                contentColor = when {
-                                    isClear -> Color(0xFF11111B)
-                                    isOperation -> Color(0xFF11111B)
-                                    else -> Color(0xFFCDD6F4)
-                                }
-                            ),
-                            shape = RoundedCornerShape(12.dp),
-                            modifier = Modifier
-                                .weight(weight)
-                                .height(64.dp)
-                        ) {
-                            Text(text = char, fontSize = 22.sp, fontWeight = FontWeight.SemiBold)
-                        }
-                    }
-                }
-            }
-        }
-    }
-}"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "androidApp/src/main/java/MainActivity.kt",
-                    content = """package com.example.androidApp
-
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import com.example.shared.App
 
 class MainActivity : ComponentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContent {
-            App()
-        }
-    }
-}"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "iosApp/iosApp/ContentView.swift",
-                    content = """import SwiftUI
-import shared
-
-struct ContentView: View {
-    var body: some View {
-        ComposeAppView()
-            .ignoresSafeArea(.keyboard)
-    }
-}
-
-struct ComposeAppView: UIViewControllerRepresentable {
-    func makeUIViewController(context: Context) -> UIViewController {
-        AppKt.MainViewController()
-    }
-
-    func updateUIViewController(_ uiViewController: UIViewController, context: Context) {}
-}"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "build.gradle.kts",
-                    content = """plugins {
-    kotlin("multiplatform") version "2.0.0"
-    id("com.android.application") version "8.2.0"
-    id("org.jetbrains.compose") version "1.6.0"
-}
-
-kotlin {
-    androidTarget()
-    
-    listOf(
-        iosX64(),
-        iosArm64(),
-        iosSimulatorArm64()
-    ).forEach { iosTarget ->
-        iosTarget.binaries.framework {
-            baseName = "shared"
-            isStatic = true
-        }
-    }
-
-    sourceSets {
-        commonMain.dependencies {
-            implementation(compose.runtime)
-            implementation(compose.foundation)
-            implementation(compose.material3)
-        }
-        androidMain.dependencies {
-            implementation("androidx.activity:activity-compose:1.8.2")
-        }
-    }
-}
-
-android {
-    namespace = "com.example.androidApp"
-    compileSdk = 34
-    defaultConfig {
-        minSdk = 24
-    }
-}"""
-                ))
-            }
-            "Compose Multiplatform Gemini Chat" -> {
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/commonMain/kotlin/App.kt",
-                    content = """// Gemini Chat Companion inside KMP App Workspace
-package com.example.shared
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.items
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Send
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-
-data class ChatMessage(val text: String, val isUser: Boolean)
-
-@OptIn(ExperimentalMaterial3Api::class)
-@Composable
-fun App() {
-    var promptText by remember { mutableStateOf("") }
-    val messages = remember { mutableStateListOf<ChatMessage>(
-        ChatMessage("Hello! I am a Gemini AI assistant inside a Kotlin Multiplatform app. How can I help you compile ideas today?", false)
-    ) }
-
-    fun sendMessage() {
-        val text = promptText.trim()
-        if (text.isEmpty()) return
-        messages.add(ChatMessage(text, true))
-        promptText = ""
-        
-        // Mocking responses since API layer runs on the server side in the main framework
-        messages.add(ChatMessage("Checking dependencies and compiling prompt. That's a great KMP concept!", false))
-    }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF0F172A))
-    ) {
-        // App bar
-        TopAppBar(
-            title = {
-                Text(
-                    text = "Gemini Multiplatform Explorer",
-                    color = Color.White,
-                    fontSize = 18.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            },
-            colors = TopAppBarDefaults.topAppBarColors(containerColor = Color(0xFF1E293B))
-        )
-
-        // Message List
-        LazyColumn(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalArrangement = Arrangement.spacedBy(8.dp)
-        ) {
-            items(messages) { msg ->
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = if (msg.isUser) Arrangement.End else Arrangement.Start
+            MaterialTheme {
+                Surface(
+                    modifier = Modifier.fillMaxSize(),
+                    color = Color(0xFF121212)
                 ) {
-                    Card(
-                        colors = CardDefaults.cardColors(
-                            containerColor = if (msg.isUser) Color(0xFF3B82F6) else Color(0xFF334155)
-                        ),
-                        shape = RoundedCornerShape(12.dp),
-                        modifier = Modifier.widthIn(max = 280.dp)
-                    ) {
-                        Text(
-                            text = msg.text,
-                            color = Color.White,
-                            modifier = Modifier.padding(12.dp),
-                            fontSize = 15.sp
-                        )
-                    }
+                    GreetingScreen()
                 }
             }
         }
-
-        // Input bottom bar
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(Color(0xFF1E293B))
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            TextField(
-                value = promptText,
-                onValueChange = { promptText = it },
-                placeholder = { Text("Ask Gemini model...") },
-                colors = TextFieldDefaults.colors(
-                    focusedTextColor = Color.White,
-                    unfocusedTextColor = Color.White,
-                    focusedContainerColor = Color(0xFF334155),
-                    unfocusedContainerColor = Color(0xFF334155),
-                    focusedIndicatorColor = Color.Transparent,
-                    unfocusedIndicatorColor = Color.Transparent
-                ),
-                shape = RoundedCornerShape(24.dp),
-                modifier = Modifier.weight(1f)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            IconButton(
-                onClick = { sendMessage() },
-                colors = IconButtonDefaults.iconButtonColors(containerColor = Color(0xFF3B82F6), contentColor = Color.White)
-            ) {
-                Icon(Icons.Default.Send, contentDescription = "Send")
-            }
-        }
     }
-}"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/commonMain/kotlin/Models.kt",
-                    content = """package com.example.shared
-
-data class UserProfile(
-    val username: String,
-    val bio: String
-)"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "build.gradle.kts",
-                    content = """plugins {
-    kotlin("multiplatform") version "2.1.0"
 }
-
-kotlin {
-    androidTarget()
-}"""
-                ))
-            }
-            else -> {
-                // KMP Hello World / Basic Greeting (Default)
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/commonMain/kotlin/Platform.kt",
-                    content = """package com.example.shared
-
-interface Platform {
-    val name: String
-}
-
-expect fun getPlatform(): Platform"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/androidMain/kotlin/Platform.android.kt",
-                    content = """package com.example.shared
-
-class AndroidPlatform : Platform {
-    override val name: String = "Android SDK 34"
-}
-
-actual fun getPlatform(): Platform = AndroidPlatform()"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/iosMain/kotlin/Platform.ios.kt",
-                    content = """package com.example.shared
-
-class IOSPlatform : Platform {
-    override val name: String = "iOS 17"
-}
-
-actual fun getPlatform(): Platform = IOSPlatform()"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/commonMain/kotlin/Greeting.kt",
-                    content = """package com.example.shared
-
-class Greeting {
-    private val platform = getPlatform()
-
-    fun greet(): String {
-        return "Hello World! Compiled on platform: " + platform.name
-    }
-}"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "shared/src/commonMain/kotlin/App.kt",
-                    content = """// Standard KMP Greeting Screen
-package com.example.shared
-
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 
 @Composable
-fun App() {
-    var message by remember { mutableStateOf("Ready to Greeting...") }
-    val greeting = remember { Greeting() }
+fun GreetingScreen() {
+    var count by remember { mutableStateOf(0) }
 
     Column(
         modifier = Modifier
@@ -537,51 +359,223 @@ fun App() {
         Card(
             colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
             elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            modifier = Modifier.fillMaxWidth().padding(16.dp)
+            modifier = Modifier.fillMaxWidth()
         ) {
             Column(
                 modifier = Modifier.padding(24.dp),
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 Text(
-                    text = "KMP Greeting Module",
-                    fontSize = 20.sp,
+                    text = "Android Jetpack Compose",
+                    fontSize = 22.sp,
                     color = Color.White,
-                    fontWeight = FontWeight.Bold,
-                    modifier = Modifier.padding(bottom = 12.dp)
+                    fontWeight = FontWeight.Bold
                 )
-                
+                Spacer(modifier = Modifier.height(12.dp))
                 Text(
-                    text = message,
-                    fontSize = 16.sp,
+                    text = "Welcome to your physical Android project compiled inside storage/emulated/0/!",
+                    fontSize = 14.sp,
                     color = Color(0xFF94A3B8),
-                    textAlign = TextAlign.Center,
-                    fontWeight = FontWeight.Medium,
-                    modifier = Modifier.fillMaxWidth().padding(vertical = 12.dp)
+                    modifier = Modifier.padding(bottom = 16.dp)
                 )
-
                 Button(
-                    onClick = { message = greeting.greet() },
-                    shape = CircleShape,
+                    onClick = { count++ },
                     colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
                 ) {
-                    Text("Trigger Shared Logic Greeting", color = Color.White)
+                    Text("Interactive Tap Counter: ${'$'}count")
                 }
             }
         }
     }
-}"""
-                ))
-                files.add(WorkspaceFile(
-                    projectId = projectId,
-                    filePath = "build.gradle.kts",
-                    content = """plugins {
-    kotlin("multiplatform") version "2.2.10"
-}"""
-                ))
+}
+""")
+
+            // 2. AndroidManifest.xml
+            val manifestFile = File(srcDir, "AndroidManifest.xml")
+            manifestFile.writeText("""<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application
+        android:allowBackup="true"
+        android:label="${project.name}"
+        android:supportsRtl="true"
+        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
+        <activity
+            android:name=".MainActivity"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+    </application>
+</manifest>
+""")
+
+            // 3. Gradle build script
+            val gradleFile = File(appDir, buildConfigType)
+            if (buildConfigType.endsWith(".kts")) {
+                gradleFile.writeText("""plugins {
+    id("com.android.application")
+    id("org.jetbrains.kotlin.android")
+}
+
+android {
+    namespace = "$packageName"
+    compileSdk = 35
+
+    defaultConfig {
+        applicationId = "$packageName"
+        minSdk = 24
+        targetSdk = $targetSdk
+        versionCode = 1
+        versionName = "1.0"
+    }
+}
+""")
+            } else {
+                gradleFile.writeText("""plugins {
+    id 'com.android.application'
+    id 'org.jetbrains.kotlin.android'
+}
+
+android {
+    namespace "$packageName"
+    compileSdk 35
+
+    defaultConfig {
+        applicationId "$packageName"
+        minSdk 24
+        targetSdk $targetSdk
+        versionCode 1
+        versionName "1.0"
+    }
+}
+""")
+            }
+
+            // 4. settings.gradle.kts
+            val settingsGradle = File(rootDir, "settings.gradle.kts")
+            settingsGradle.writeText("""rootProject.name = "${project.name}"
+include(":app")
+""")
+
+            // 5. strings.xml
+            val stringsXml = File(resDir, "strings.xml")
+            stringsXml.writeText("""<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">${project.name}</string>
+</resources>
+""")
+
+        } else {
+            // Flutter Project Creation on disk
+            var orgName = "com.mtos.phoenix.ide.hybrid"
+            val orgRegex = """Org:\s*([a-zA-Z0-9._]+)""".toRegex()
+            orgRegex.find(templateType)?.let {
+                orgName = it.groupValues[1]
+            }
+
+            val pList = mutableListOf<String>()
+            if (templateType.contains("Android")) pList.add("android")
+            if (templateType.contains("iOS")) pList.add("ios")
+            if (templateType.contains("Web")) pList.add("web")
+            if (pList.isEmpty()) {
+                pList.add("android")
+                pList.add("ios")
+            }
+
+            val libDir = File(rootDir, "lib")
+            libDir.mkdirs()
+
+            // 1. main.dart
+            val mainDart = File(libDir, "main.dart")
+            mainDart.writeText("""import 'package:flutter/material.dart';
+
+void main() {
+  runApp(const MyApp());
+}
+
+class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: '${project.name}',
+      theme: ThemeData(
+        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.dark),
+        useMaterial3: true,
+      ),
+      home: const MyHomePage(),
+    );
+  }
+}
+
+class MyHomePage extends StatefulWidget {
+  const MyHomePage({super.key});
+
+  @override
+  State<MyHomePage> createState() => _MyHomePageState();
+}
+
+class _MyHomePageState extends State<MyHomePage> {
+  int _counter = 0;
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('${project.name} Flutter App'),
+      ),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: <Widget>[
+            const Text(
+              'Welcome to your physical Flutter project built on disk!',
+            ),
+            Text(
+              '${'$'}_counter',
+              style: Theme.of(context).textTheme.headlineMedium,
+            ),
+          ],
+        ),
+      ),
+      floatingActionButton: FloatingActionButton(
+        onPressed: () {
+          setState(() {
+            _counter++;
+          });
+        },
+        tooltip: 'Increment',
+        child: const Icon(Icons.add),
+      ),
+    );
+  }
+}
+""")
+
+            // 2. pubspec.yaml
+            val pubspec = File(rootDir, "pubspec.yaml")
+            pubspec.writeText("""name: ${project.name.lowercase().replace(" ", "_")}
+description: A new Flutter project generated inside local device storage.
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+flutter:
+  uses-material-design: true
+""")
+
+            // Create directories for other selected platforms
+            pList.forEach { platform ->
+                File(rootDir, platform).mkdirs()
             }
         }
-
-        workspaceDao.insertFiles(files)
     }
 }
