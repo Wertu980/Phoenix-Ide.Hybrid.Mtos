@@ -628,5 +628,148 @@ This project is fully ready for split-screen emulator previewing, code modificat
                 File(rootDir, platform).mkdirs()
             }
         }
+        
+        // Write the custom Aarch64 Linux sandbox setup script under the project root
+        writeSandboxSetupScript(rootDir, project.name)
+    }
+
+    private fun writeSandboxSetupScript(rootDir: File, projectName: String) {
+        val scriptContent = """
+#!/bin/bash
+# ==============================================================================
+# Phoenix IDE - Aarch64 On-Device Linux Sandbox Installer (v2.1)
+# Highly optimized for OpenJDK 21, Android SDK (cmdline-tools), Gradle & Flutter.
+# ==============================================================================
+
+set -e
+
+# Colors for modern and beautiful terminal output
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+PURPLE='\033[0;35m'
+CYAN='\033[0;36m'
+NC='\033[0m'
+
+echo -e "__DL__{PURPLE}================================================================__DL__{NC}"
+echo -e "__DL__{CYAN}    _  _   _             _      ___   _ _   _ _   _ _  _   ___ __DL__{NC}"
+echo -e "__DL__{CYAN}   /_\(_) | |\/|__ _ _ _/ |__  | __|_(_|_) | (_| | (_)| | | __|__DL__{NC}"
+echo -e "__DL__{CYAN}  / _ \ | |  _  / _\` | '_ \ '_ \ | _| | _| | | _| | |  _| | _| | _| __DL__{NC}"
+echo -e "__DL__{CYAN} /_/ \_\_| |_| |_\__,_|_| |_|_| |_|___|_|_|  |_|_|  |_|   |___|__DL__{NC}"
+echo -e "__DL__{CYAN}         Phoenix IDE Aarch64 Hybrid Sandbox Setup Script           __DL__{NC}"
+echo -e "__DL__{PURPLE}================================================================__DL__{NC}"
+echo ""
+
+# Check architecture
+ARCH=__DL__(uname -m)
+if [ "__DL__ARCH" != "aarch64" ] && [ "__DL__ARCH" != "arm64" ]; then
+    echo -e "__DL__{YELLOW}[WARNING] Host architecture is __DL__{ARCH}. This installer is highly tuned for ARM64/Aarch64 environments (e.g., Termux, Proot-Distro, UserLAnd). Running on __DL__{ARCH} may require alternate binaries.__DL__{NC}"
+else
+    echo -e "__DL__{GREEN}[OK] Detected ARM64/Aarch64 Architecture! Environment check passed.__DL__{NC}"
+fi
+
+# Define path configurations
+SANDBOX_DIR="__DL__{HOME}/phoenix-sandbox"
+JAVA_DIR="__DL__{SANDBOX_DIR}/jvm/openjdk-21"
+SDK_DIR="__DL__{SANDBOX_DIR}/android-sdk"
+FLUTTER_DIR="__DL__{SANDBOX_DIR}/flutter"
+
+echo -e "\n__DL__{BLUE}[1/5] Creating Sandbox Directory Structure under __DL__{SANDBOX_DIR}...__DL__{NC}"
+mkdir -p "__DL__{SANDBOX_DIR}"
+mkdir -p "__DL__{SANDBOX_DIR}/jvm"
+mkdir -p "__DL__{SDK_DIR}/cmdline-tools"
+mkdir -p "__DL__{SANDBOX_DIR}/bin"
+
+# System dependencies installations
+echo -e "\n__DL__{BLUE}[2/5] Preparing Sandbox Package Dependencies...__DL__{NC}"
+if [ -f /etc/debian_version ] || [ -f /etc/ubuntu_version ]; then
+    echo -e "__DL__{GREEN}Detected Debian/Ubuntu-based sandbox context. Updating apt repositories...__DL__{NC}"
+    sudo apt-get update -y || apt-get update -y
+    sudo apt-get install -y wget curl git unzip zip xz-utils libglu1-mesa libc6 libstdc++6 -y || apt-get install -y wget curl git unzip zip xz-utils libglu1-mesa -y
+elif command -v pkg &> /dev/null; then
+    echo -e "__DL__{GREEN}Detected pure Termux userland environment. Installing packages...__DL__{NC}"
+    pkg update -y
+    pkg install -y wget curl git unzip zip tar clang make openssl nodejs -y
+else
+    echo -e "__DL__{YELLOW}[INFO] Unknown environment type. Ensure wget, curl, git, unzip, and tar are manually installed.__DL__{NC}"
+fi
+
+# Install OpenJDK 21 for Aarch64
+echo -e "\n__DL__{BLUE}[3/5] Configuring OpenJDK 21 for Aarch64...__DL__{NC}"
+if [ -d "__DL__{JAVA_DIR}" ]; then
+    echo -e "__DL__{YELLOW}OpenJDK 21 directory already exists under __DL__{JAVA_DIR}. Skipping download.__DL__{NC}"
+else
+    echo -e "__DL__{CYAN}Retrieving production-ready Eclipse Temurin ADPT OpenJDK 21 binary for Aarch64 Linux...__DL__{NC}"
+    JDK_URL="https://github.com/adoptium/temurin21-binaries/releases/download/jdk-21.0.2%2B13/OpenJDK21U-jdk_aarch64_linux_hotspot_21.0.2_13.tar.gz"
+    wget -q --show-progress -O /tmp/jdk21.tar.gz "__DL__{JDK_URL}"
+    echo -e "__DL__{GREEN}Extracting JDK 21 to __DL__{JAVA_DIR}...__DL__{NC}"
+    tar -xzf /tmp/jdk21.tar.gz -C "__DL__{SANDBOX_DIR}/jvm"
+    mv "__DL__{SANDBOX_DIR}/jvm/jdk-21.0.2+13" "__DL__{JAVA_DIR}"
+    rm /tmp/jdk21.tar.gz
+fi
+
+# Install Android SDK Command-Line Tools
+echo -e "\n__DL__{BLUE}[4/5] Installing Android SDK Tools...__DL__{NC}"
+if [ -d "__DL__{SDK_DIR}/cmdline-tools/latest" ]; then
+    echo -e "__DL__{YELLOW}Android SDK command-line-tools already exists. Skipping download.__DL__{NC}"
+else
+    echo -e "__DL__{CYAN}Downloading official Linux command-line-tools ZIP package...__DL__{NC}"
+    CMDLINE_URL="https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip"
+    wget -q --show-progress -O /tmp/cmdline.zip "__DL__{CMDLINE_URL}"
+    echo -e "__DL__{GREEN}Extracting SDK tools directory layout...__DL__{NC}"
+    unzip -q /tmp/cmdline.zip -d "__DL__{SDK_DIR}/cmdline-tools"
+    mv "__DL__{SDK_DIR}/cmdline-tools/cmdline-tools" "__DL__{SDK_DIR}/cmdline-tools/latest"
+    rm /tmp/cmdline.zip
+fi
+
+# Install Flutter SDK
+echo -e "\n__DL__{BLUE}[5/5] Deploying Flutter Stable SDK...__DL__{NC}"
+if [ -d "__DL__{FLUTTER_DIR}" ]; then
+    echo -e "__DL__{YELLOW}Flutter directory already exists under __DL__{FLUTTER_DIR}. Cruising ahead.__DL__{NC}"
+else
+    echo -e "__DL__{CYAN}Cloning Flutter Stable branch directly from upstream Github...__DL__{NC}"
+    git clone https://github.com/flutter/flutter.git -b stable "__DL__{FLUTTER_DIR}" --depth 1
+fi
+
+# Set Environment Variables and finalize paths
+echo -e "\n__DL__{BLUE}================================================================__DL__{NC}"
+echo -e "__DL__{GREEN}🎉 INSTALLATION AND DEPLOYMENT WAS SUCCESSFUL!__DL__{NC}"
+echo -e "__DL__{BLUE}================================================================__DL__{NC}"
+
+# Generating setup profile environment paths sheet
+PROFILE_FILE="__DL__{SANDBOX_DIR}/load_env.sh"
+cat << EOF > "__DL__{PROFILE_FILE}"
+# Phoenix IDE Environment Configuration Profile Sheet
+export JAVA_HOME="__DL__{JAVA_DIR}"
+export ANDROID_HOME="__DL__{SDK_DIR}"
+export FLUTTER_HOME="__DL__{FLUTTER_DIR}"
+export PATH="\\__DL__JAVA_HOME/bin:\\__DL__ANDROID_HOME/cmdline-tools/latest/bin:\\__DL__ANDROID_HOME/platform-tools:\\__DL__FLUTTER_HOME/bin:\\__DL__PATH"
+
+echo -e "\\e[32m[Phoenix Sandbox] OpenJDK 21, Android SDK, and Flutter Environment active successfully!\\e[0m"
+EOF
+chmod +x "__DL__{PROFILE_FILE}"
+
+echo -e "__DL__{YELLOW}Generated environment script sheet at: __DL__{PROFILE_FILE}__DL__{NC}"
+echo -e "To load the environment instantly in your shell sessions, execute:"
+echo -e "__DL__{CYAN}    source __DL__{PROFILE_FILE}__DL__{NC}"
+echo -e "\nThen, accept SDK licenses and fetch build tools using:"
+echo -e "__DL__{CYAN}    yes | sdkmanager --licenses__DL__{NC}"
+echo -e "__DL__{CYAN}    sdkmanager \"platforms;android-34\" \"build-tools;34.0.0\" \"platform-tools\"__DL__{NC}"
+echo -e ""
+echo -e "Test your complete compiler configuration toolchain anytime:"
+echo -e "__DL__{CYAN}    java -version__DL__{NC}"
+echo -e "__DL__{CYAN}    flutter doctor__DL__{NC}"
+echo -e "__DL__{PURPLE}================================================================__DL__{NC}"
+        """.trimIndent()
+            .replace("__DL__", "$")
+            .trim()
+
+        try {
+            val scriptFile = File(rootDir, "setup_sandbox_aarch64.sh")
+            scriptFile.writeText(scriptContent)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 }

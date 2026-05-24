@@ -530,19 +530,51 @@ fun WorkspaceScreen(
 
     if (showSettingsDialog) {
         var localUrlInput by remember { mutableStateOf(cloudCompilerServerUrl) }
+        var activeTab by remember { mutableStateOf(0) } // 0: Engine settings, 1: Aarch64 Sandbox Info
         
         AlertDialog(
             onDismissRequest = { showSettingsDialog = false },
             title = {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Icon(
-                        imageVector = Icons.Default.Settings,
-                        contentDescription = "Settings",
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Compiler Server & Engine Settings", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(
+                            imageVector = Icons.Default.Settings,
+                            contentDescription = "Settings",
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Compiler & System Engine Settings", fontSize = 16.sp, fontWeight = FontWeight.Bold)
+                    }
+                    
+                    // Styled custom Tab selector
+                    Row(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f), RoundedCornerShape(8.dp))
+                            .padding(4.dp)
+                    ) {
+                        listOf("Local & Remote Engine" to 0, "Aarch64 Sandbox" to 1).forEach { (label, index) ->
+                            val isSelected = activeTab == index
+                            Box(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .clip(RoundedCornerShape(6.dp))
+                                    .background(if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent)
+                                    .clickable { activeTab = index }
+                                    .padding(vertical = 8.dp),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Text(
+                                    text = label,
+                                    fontSize = 11.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+                    }
                 }
             },
             text = {
@@ -550,96 +582,221 @@ fun WorkspaceScreen(
                     verticalArrangement = Arrangement.spacedBy(16.dp),
                     modifier = Modifier
                         .fillMaxWidth()
+                        .heightIn(max = 400.dp) // Maintain sensible sizing constraints
                         .verticalScroll(rememberScrollState())
                 ) {
-                    Text(
-                        text = "Choose whether your code package is built using real servers or simulated core on device.",
-                        fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
-                    )
-                    
-                    Divider(color = Color.Gray.copy(alpha = 0.2f))
-                    
-                    // Toggle option for Remote Cloud Compiler server
-                    Column {
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text("Remote Compiler Server", fontWeight = FontWeight.Bold, fontSize = 14.sp)
-                                Text("Send codebase directly to an online compiler server", fontSize = 11.sp, color = Color.Gray)
-                            }
-                            Switch(
-                                checked = isCloudCompilerEnabled,
-                                onCheckedChange = { viewModel.setCloudCompilerEnabled(it) }
-                            )
-                        }
-                    }
-                    
-                    if (isCloudCompilerEnabled) {
-                        // Compiler API endpoint input field
-                        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                            Text("Compiler API URL Endpoint", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                            OutlinedTextField(
-                                value = localUrlInput,
-                                onValueChange = { 
-                                    localUrlInput = it
-                                    viewModel.setCloudCompilerUrl(it) 
-                                },
-                                textStyle = TextStyle(fontSize = 12.sp),
-                                placeholder = { Text("https://compiler.yourdomain.com/compile", fontSize = 11.sp) },
-                                modifier = Modifier.fillMaxWidth(),
-                                singleLine = true
-                            )
-                            Text(
-                                text = "Your package server configuration must parse compiler request structures carrying the file list payload successfully.",
-                                fontSize = 10.sp,
-                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
-                            )
-                        }
-                    } else {
-                        // Local simulation core active notice info
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .clip(RoundedCornerShape(8.dp))
-                                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
-                                .padding(12.dp)
-                        ) {
+                    if (activeTab == 0) {
+                        Text(
+                            text = "Choose whether your code package is built using real servers or simulated core on device.",
+                            fontSize = 12.sp,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.7f)
+                        )
+                        
+                        Divider(color = Color.Gray.copy(alpha = 0.2f))
+                        
+                        // Toggle option for Remote Cloud Compiler server
+                        Column {
                             Row(
-                                verticalAlignment = Alignment.Top, 
-                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Icon(
-                                    imageVector = Icons.Default.Info,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.primary,
-                                    modifier = Modifier.size(16.dp)
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text("Remote Compiler Server", fontWeight = FontWeight.Bold, fontSize = 14.sp)
+                                    Text("Send codebase directly to an online compiler server", fontSize = 11.sp, color = Color.Gray)
+                                }
+                                Switch(
+                                    checked = isCloudCompilerEnabled,
+                                    onCheckedChange = { viewModel.setCloudCompilerEnabled(it) }
+                                )
+                            }
+                        }
+                        
+                        if (isCloudCompilerEnabled) {
+                            // Compiler API endpoint input field
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Compiler API URL Endpoint", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                                OutlinedTextField(
+                                    value = localUrlInput,
+                                    onValueChange = { 
+                                        localUrlInput = it
+                                        viewModel.setCloudCompilerUrl(it) 
+                                    },
+                                    textStyle = TextStyle(fontSize = 12.sp),
+                                    placeholder = { Text("https://compiler.yourdomain.com/compile", fontSize = 11.sp) },
+                                    modifier = Modifier.fillMaxWidth(),
+                                    singleLine = true
                                 )
                                 Text(
-                                    text = "Local simulation core is active. Clicking RUN compiles the hot-reload mockup immediately inside the split-screen frame without remote connections.",
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                    text = "Your package server configuration must parse compiler request structures carrying the file list payload successfully.",
+                                    fontSize = 10.sp,
+                                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.7f)
                                 )
                             }
+                        } else {
+                            // Local simulation core active notice info
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f))
+                                    .padding(12.dp)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.Top, 
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Info,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Text(
+                                        text = "Local simulation core is active. Clicking RUN compiles the hot-reload mockup immediately inside the split-screen frame without remote connections.",
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                    )
+                                }
+                            }
                         }
-                    }
-                    
-                    Divider(color = Color.Gray.copy(alpha = 0.2f))
-                    
-                    // Device target platform custom chips
-                    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                        Text("Default Preview Platform", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
-                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            listOf("android" to "Android Emulation", "ios" to "iOS Emulation").forEach { (platformId, label) ->
-                                val selected = emulatorPlatform == platformId
-                                FilterChip(
-                                    selected = selected,
-                                    onClick = { viewModel.setEmulatorPlatform(platformId) },
-                                    label = { Text(label, fontSize = 11.sp) }
-                                )
+                        
+                        Divider(color = Color.Gray.copy(alpha = 0.2f))
+                        
+                        // Device target platform custom chips
+                        Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                            Text("Default Preview Platform", fontWeight = FontWeight.SemiBold, fontSize = 12.sp)
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf("android" to "Android Emulation", "ios" to "iOS Emulation").forEach { (platformId, label) ->
+                                    val selected = emulatorPlatform == platformId
+                                    FilterChip(
+                                        selected = selected,
+                                        onClick = { viewModel.setEmulatorPlatform(platformId) },
+                                        label = { Text(label, fontSize = 11.sp) }
+                                    )
+                                }
+                            }
+                        }
+                    } else {
+                        // Aarch64 Linux private sandbox documentation structure
+                        Column(verticalArrangement = Arrangement.spacedBy(14.dp)) {
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color(0xFF2E7D32).copy(alpha = 0.08f))
+                                    .border(1.dp, Color(0xFF2E7D32).copy(alpha = 0.2f), RoundedCornerShape(8.dp))
+                                    .padding(12.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically, 
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.CheckCircle,
+                                            contentDescription = null,
+                                            tint = Color(0xFF4CAF50),
+                                            modifier = Modifier.size(16.dp)
+                                        )
+                                        Text(
+                                            text = "On-Device Sandbox Setup Script Ready! ⚡",
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = Color(0xFF4CAF50)
+                                        )
+                                    }
+                                    Text(
+                                        text = "Phoenix IDE automatically placed 'setup_sandbox_aarch64.sh' in your workspace root! View details below to build your real terminal environment.",
+                                        fontSize = 10.5.sp,
+                                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                                    )
+                                }
+                            }
+
+                            Text(
+                                text = "AARCH64 SANDBOX CODES & COMMANDS",
+                                fontSize = 11.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            // Step 1 command box
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Step 1: Navigate to Project Folder (e.g., Termux/PRoot)", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xFF151515))
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = "cd /storage/emulated/0/PhoenixIDE/" + (activeProject?.name?.replace(" ", "\\ ") ?: "YourProject"),
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        color = Color(0xFF81C784)
+                                    )
+                                }
+                            }
+
+                            // Step 2 command box
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Step 2: Bootstrap OpenJDK 21, Android SDK & Flutter", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xFF151515))
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = "chmod +x setup_sandbox_aarch64.sh && ./setup_sandbox_aarch64.sh",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        color = Color(0xFF64B5F6)
+                                    )
+                                }
+                            }
+
+                            // Step 3 command box
+                            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text("Step 3: Load Sandbox System Path Environments", fontSize = 12.sp, fontWeight = FontWeight.SemiBold)
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clip(RoundedCornerShape(6.dp))
+                                        .background(Color(0xFF151515))
+                                        .padding(8.dp)
+                                ) {
+                                    Text(
+                                        text = "source ~/phoenix-sandbox/load_env.sh\nyes | sdkmanager --licenses\nsdkmanager \"platforms;android-34\" \"build-tools;34.0.0\" \"platform-tools\"",
+                                        fontFamily = FontFamily.Monospace,
+                                        fontSize = 10.sp,
+                                        color = Color(0xFFFFB74D)
+                                    )
+                                }
+                            }
+
+                            Divider(color = Color.Gray.copy(alpha = 0.2f))
+
+                            // Package Contents Details
+                            Text("Included Sandbox Packages Detail", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                listOf(
+                                    "OpenJDK 21 - Eclipse Temurin Enterprise Hotspot (Aarch64 Linux Target Binaries)",
+                                    "Android SDK CommandLine Tools - Linux SDK bundle configured for silent sdkmanager execution",
+                                    "Flutter Core Stable Channel - Secure git fetch mirror setup inside your custom profile",
+                                    "Environment variables profile sheet load_env.sh loader with clean PATH mapping structures"
+                                ).forEach { infoLine ->
+                                    Row(
+                                        verticalAlignment = Alignment.Top, 
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Text("•", fontSize = 12.sp, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                        Text(infoLine, fontSize = 10.sp, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f))
+                                    }
+                                }
                             }
                         }
                     }
