@@ -1,4 +1,4 @@
-package com.example.ui
+package com.mtos.phoenix.ide.hybrid.ui
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -23,8 +23,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.res.painterResource
-import com.example.R
-import com.example.viewmodel.IdeViewModel
+import com.mtos.phoenix.ide.hybrid.R
+import com.mtos.phoenix.ide.hybrid.viewmodel.IdeViewModel
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -37,13 +37,13 @@ fun TemplateScreen(
     var newProjectName by remember { mutableStateOf("") }
 
     // Custom configuration states for Android Workspace Setup
-    var androidPackageName by remember { mutableStateOf("com.example.myandroidapp") }
+    var androidPackageName by remember { mutableStateOf("com.mtos.phoenix.ide.hybrid.androidapp") }
     var selectedTargetSdk by remember { mutableStateOf("Android 15 (API 35)") }
     var androidBuildConfig by remember { mutableStateOf("build.gradle.kts") }
     var targetSdkDropdownExpanded by remember { mutableStateOf(false) }
 
     // Custom configuration states for Flutter Workspace Setup
-    var flutterOrgName by remember { mutableStateOf("com.example.myflutterapp") }
+    var flutterOrgName by remember { mutableStateOf("com.mtos.phoenix.ide.hybrid.flutterapp") }
     var selectedPlatforms by remember { mutableStateOf(setOf("Android", "iOS", "Web")) }
 
     // Synchronize package namespace suggestions as user customizes the project title
@@ -51,8 +51,8 @@ fun TemplateScreen(
         val cleanName = newProjectName.lowercase()
             .replace(Regex("[^a-z0-9]"), "")
         if (cleanName.isNotBlank()) {
-            androidPackageName = "com.aistudio.$cleanName"
-            flutterOrgName = "com.example.$cleanName"
+            androidPackageName = "com.mtos.phoenix.ide.hybrid.$cleanName"
+            flutterOrgName = "com.mtos.phoenix.ide.hybrid.$cleanName"
         }
     }
 

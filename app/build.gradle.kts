@@ -7,11 +7,11 @@ plugins {
 }
 
 android {
-  namespace = "com.example"
+  namespace = "com.mtos.phoenix.ide.hybrid"
   compileSdk { version = release(36) { minorApiLevel = 1 } }
 
   defaultConfig {
-    applicationId = "com.aistudio.hybridide.swvjzn"
+    applicationId = "com.mtos.phoenix.ide.hybrid"
     minSdk = 24
     targetSdk = 36
     versionCode = 1
