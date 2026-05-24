@@ -1,0 +1,4 @@
+include ':app'
+
+var gpw = System.getenv("GRADLE_USER_HOME")
+// Flutter wrapper project references

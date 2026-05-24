@@ -275,6 +275,45 @@ class WorkspaceRepository(
         return readSettings()[key]
     }
 
+    private fun copyAssetFolder(assetPath: String, targetFolder: File, replacements: Map<String, String>) {
+        val assets = try {
+            context.assets.list(assetPath)
+        } catch (e: Exception) {
+            null
+        } ?: return
+
+        if (assets.isEmpty()) {
+            // It's a file
+            try {
+                val content = context.assets.open(assetPath).use { it.bufferedReader().readText() }
+                var updatedContent = content
+                for ((placeholder, replacement) in replacements) {
+                    updatedContent = updatedContent.replace(placeholder, replacement)
+                }
+                
+                val fileName = File(assetPath).name
+                val targetFile = if (fileName == "MainActivity.kt") {
+                    val packageSubPath = replacements["__PACKAGE_NAME__"]?.replace('.', '/') ?: "com/example"
+                    File(targetFolder, "$packageSubPath/$fileName")
+                } else {
+                    File(targetFolder, fileName)
+                }
+                targetFile.parentFile?.mkdirs()
+                targetFile.writeText(updatedContent)
+            } catch (e: Exception) {
+                targetFolder.mkdirs()
+            }
+        } else {
+            // It is a directory
+            targetFolder.mkdirs()
+            for (asset in assets) {
+                val childAssetPath = if (assetPath.isEmpty()) asset else "$assetPath/$asset"
+                val childTargetFolder = File(targetFolder, asset)
+                copyAssetFolder(childAssetPath, childTargetFolder, replacements)
+            }
+        }
+    }
+
     private fun createTemplateFilesOnDisk(project: Project) {
         val rootDir = getProjectDir(project)
         if (!rootDir.exists()) {
@@ -284,295 +323,51 @@ class WorkspaceRepository(
         val templateType = project.templateType
         if (templateType.contains("Android", ignoreCase = true) || templateType.contains("Calculator", ignoreCase = true)) {
             var packageName = "com.mtos.phoenix.ide.hybrid.androidapp"
-            var targetSdk = "35"
-            var buildConfigType = "build.gradle.kts"
+            var targetSdk = "34"
 
             val packageRegex = """Namespace:\s*([a-zA-Z0-9._]+)""".toRegex()
             packageRegex.find(templateType)?.let {
                 packageName = it.groupValues[1]
             }
-            val sdkRegex = """API\s*(\2[0-9]|\3[0-9])""".toRegex()
+            val sdkRegex = """API\s*(\2[0-9]|\3[0-9]|34|35)""".toRegex()
             sdkRegex.find(templateType)?.let {
                 targetSdk = it.groupValues[1]
             }
-            if (templateType.contains("build.gradle") && !templateType.contains("build.gradle.kts")) {
-                buildConfigType = "build.gradle"
-            }
 
-            val appDir = File(rootDir, "app")
-            val srcDir = File(appDir, "src/main")
-            val packagePath = packageName.replace('.', '/')
-            val javaDir = File(srcDir, "java/$packagePath")
-            val resDir = File(srcDir, "res/values")
-            val layoutDir = File(srcDir, "res/layout")
+            val replacements = mapOf(
+                "__PROJECT_NAME__" to project.name,
+                "__PACKAGE_NAME__" to packageName,
+                "__TARGET_SDK__" to targetSdk,
+                "__MAIN_ACTIVITY_NAME__" to "MainActivity"
+            )
 
-            javaDir.mkdirs()
-            resDir.mkdirs()
-            layoutDir.mkdirs()
-
-            // 1. MainActivity.kt
-            val mainActivityFile = File(javaDir, "MainActivity.kt")
-            mainActivityFile.writeText("""package $packageName
-
-import android.os.Bundle
-import androidx.activity.ComponentActivity
-import androidx.activity.compose.setContent
-import androidx.compose.foundation.background
-import androidx.compose.foundation.layout.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
-import androidx.compose.ui.Alignment
-import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-
-class MainActivity : ComponentActivity() {
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        setContent {
-            MaterialTheme {
-                Surface(
-                    modifier = Modifier.fillMaxSize(),
-                    color = Color(0xFF121212)
-                ) {
-                    GreetingScreen()
-                }
-            }
-        }
-    }
-}
-
-@Composable
-fun GreetingScreen() {
-    var count by remember { mutableStateOf(0) }
-
-    Column(
-        modifier = Modifier
-            .fillMaxSize()
-            .background(Color(0xFF0F172A))
-            .padding(24.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.Center
-    ) {
-        Card(
-            colors = CardDefaults.cardColors(containerColor = Color(0xFF1E293B)),
-            elevation = CardDefaults.cardElevation(defaultElevation = 8.dp),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier.padding(24.dp),
-                horizontalAlignment = Alignment.CenterHorizontally
-            ) {
-                Text(
-                    text = "Android Jetpack Compose",
-                    fontSize = 22.sp,
-                    color = Color.White,
-                    fontWeight = FontWeight.Bold
-                )
-                Spacer(modifier = Modifier.height(12.dp))
-                Text(
-                    text = "Welcome to your physical Android project compiled inside storage/emulated/0/!",
-                    fontSize = 14.sp,
-                    color = Color(0xFF94A3B8),
-                    modifier = Modifier.padding(bottom = 16.dp)
-                )
-                Button(
-                    onClick = { count++ },
-                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF3B82F6))
-                ) {
-                    Text("Interactive Tap Counter: ${'$'}count")
-                }
-            }
-        }
-    }
-}
-""")
-
-            // 2. AndroidManifest.xml
-            val manifestFile = File(srcDir, "AndroidManifest.xml")
-            manifestFile.writeText("""<?xml version="1.0" encoding="utf-8"?>
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <application
-        android:allowBackup="true"
-        android:label="${project.name}"
-        android:supportsRtl="true"
-        android:theme="@android:style/Theme.DeviceDefault.NoActionBar">
-        <activity
-            android:name=".MainActivity"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.intent.action.MAIN" />
-                <category android:name="android.intent.category.LAUNCHER" />
-            </intent-filter>
-        </activity>
-    </application>
-</manifest>
-""")
-
-            // 3. Gradle build script
-            val gradleFile = File(appDir, buildConfigType)
-            if (buildConfigType.endsWith(".kts")) {
-                gradleFile.writeText("""plugins {
-    id("com.android.application")
-    id("org.jetbrains.kotlin.android")
-}
-
-android {
-    namespace = "$packageName"
-    compileSdk = 35
-
-    defaultConfig {
-        applicationId = "$packageName"
-        minSdk = 24
-        targetSdk = $targetSdk
-        versionCode = 1
-        versionName = "1.0"
-    }
-}
-""")
-            } else {
-                gradleFile.writeText("""plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
-}
-
-android {
-    namespace "$packageName"
-    compileSdk 35
-
-    defaultConfig {
-        applicationId "$packageName"
-        minSdk 24
-        targetSdk $targetSdk
-        versionCode 1
-        versionName "1.0"
-    }
-}
-""")
-            }
-
-            // 4. settings.gradle.kts
-            val settingsGradle = File(rootDir, "settings.gradle.kts")
-            settingsGradle.writeText("""rootProject.name = "${project.name}"
-include(":app")
-""")
-
-            // 5. strings.xml
-            val stringsXml = File(resDir, "strings.xml")
-            stringsXml.writeText("""<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">${project.name}</string>
-</resources>
-""")
+            // Copy recursively from templates/android assets
+            copyAssetFolder("templates/android", rootDir, replacements)
 
         } else {
-            // Flutter Project Creation on disk
+            // Flutter Project Creation using templates/flutter assets
             var orgName = "com.mtos.phoenix.ide.hybrid"
             val orgRegex = """Org:\s*([a-zA-Z0-9._]+)""".toRegex()
             orgRegex.find(templateType)?.let {
                 orgName = it.groupValues[1]
             }
 
+            val appNameLower = project.name.lowercase().replace(Regex("[^a-z0-9_]"), "")
+            val packageName = "$orgName.$appNameLower"
+
+            val replacements = mapOf(
+                "__PROJECT_NAME__" to project.name,
+                "__PROJECT_NAME_LOWER__" to appNameLower,
+                "__PACKAGE_NAME__" to packageName
+            )
+
+            // Copy recursively from templates/flutter assets
+            copyAssetFolder("templates/flutter", rootDir, replacements)
+
+            // Create placeholder extra folders if necessary
             val pList = mutableListOf<String>()
-            if (templateType.contains("Android")) pList.add("android")
             if (templateType.contains("iOS")) pList.add("ios")
             if (templateType.contains("Web")) pList.add("web")
-            if (pList.isEmpty()) {
-                pList.add("android")
-                pList.add("ios")
-            }
-
-            val libDir = File(rootDir, "lib")
-            libDir.mkdirs()
-
-            // 1. main.dart
-            val mainDart = File(libDir, "main.dart")
-            mainDart.writeText("""import 'package:flutter/material.dart';
-
-void main() {
-  runApp(const MyApp());
-}
-
-class MyApp extends StatelessWidget {
-  const MyApp({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return MaterialApp(
-      title: '${project.name}',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple, brightness: Brightness.dark),
-        useMaterial3: true,
-      ),
-      home: const MyHomePage(),
-    );
-  }
-}
-
-class MyHomePage extends StatefulWidget {
-  const MyHomePage({super.key});
-
-  @override
-  State<MyHomePage> createState() => _MyHomePageState();
-}
-
-class _MyHomePageState extends State<MyHomePage> {
-  int _counter = 0;
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('${project.name} Flutter App'),
-      ),
-      body: Center(
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: <Widget>[
-            const Text(
-              'Welcome to your physical Flutter project built on disk!',
-            ),
-            Text(
-              '${'$'}_counter',
-              style: Theme.of(context).textTheme.headlineMedium,
-            ),
-          ],
-        ),
-      ),
-      floatingActionButton: FloatingActionButton(
-        onPressed: () {
-          setState(() {
-            _counter++;
-          });
-        },
-        tooltip: 'Increment',
-        child: const Icon(Icons.add),
-      ),
-    );
-  }
-}
-""")
-
-            // 2. pubspec.yaml
-            val pubspec = File(rootDir, "pubspec.yaml")
-            pubspec.writeText("""name: ${project.name.lowercase().replace(" ", "_")}
-description: A new Flutter project generated inside local device storage.
-version: 1.0.0+1
-
-environment:
-  sdk: '>=3.0.0 <4.0.0'
-
-dependencies:
-  flutter:
-    sdk: flutter
-
-flutter:
-  uses-material-design: true
-""")
-
-            // Create directories for other selected platforms
             pList.forEach { platform ->
                 File(rootDir, platform).mkdirs()
             }
