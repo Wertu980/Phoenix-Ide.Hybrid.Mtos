@@ -159,8 +159,35 @@ class IdeViewModel(private val repository: WorkspaceRepository) : ViewModel() {
 
     fun createProject(name: String, templateType: String) {
         viewModelScope.launch {
+            val isFlutter = templateType.contains("Flutter", ignoreCase = true)
+            val isAndroid = templateType.contains("Android", ignoreCase = true) || templateType.contains("Calculator", ignoreCase = true)
+
+            if (isFlutter) {
+                _terminalLogs.value = _terminalLogs.value + listOf(
+                    "> flutter create --org com.mtos.phoenix.ide.hybrid.flutterapp --template=app ${name.lowercase().replace(" ", "_")}",
+                    "Creating Flutter project ${name}... ",
+                    "Running 'flutter pub get' in ${name}/...",
+                    "[✓] Flutter (Channel stable, 3.19.2, SDK Android 34 / IOS 17)",
+                    "[✓] Android toolchain - develop for Android devices (Android SDK version 34.0.0)",
+                    "[✓] Chrome - develop for the web",
+                    "Wrote 114 files inside device storage structures",
+                    "All done! Your Flutter package application is ready.",
+                    "In order to edit your app code, navigate to lib/main.dart or run 'flutter run'"
+                )
+            } else if (isAndroid) {
+                _terminalLogs.value = _terminalLogs.value + listOf(
+                    "> android SDK create project --package=com.mtos.phoenix.ide.hybrid.androidapp --name=\"$name\"",
+                    "Configuring Android template files inside /storage/emulated/0/PhoenixIDE...",
+                    "Generating AndroidManifest.xml, app/build.gradle.kts, settings.gradle.kts...",
+                    "Configuring Gradle Kotlin DSL Wrapper assets daemon...",
+                    "Successfully loaded Android Compose template assets directly from internal system storage",
+                    "All done! Open app/src/main/java to edit the Main activity code."
+                )
+            } else {
+                addTerminalLog("Created project: $name with template $templateType")
+            }
+
             val newId = repository.insertProject(Project(name = name, templateType = templateType))
-            addTerminalLog("Created project: $name with template $templateType")
         }
     }
 
@@ -209,25 +236,42 @@ class IdeViewModel(private val repository: WorkspaceRepository) : ViewModel() {
         _buildStatus.value = BuildStatus.Running
         viewModelScope.launch {
             val active = _activeProject.value
-            val buildLogs = mutableListOf<String>()
+            val isFlutter = active?.templateType?.contains("Flutter", ignoreCase = true) ?: false
+            
             val appendLog = { s: String ->
-                buildLogs.add(s)
                 _terminalLogs.value = _terminalLogs.value + s
             }
 
-            appendLog("> Starting gradle daemon to compile in parallel...")
-            delay(800)
-            appendLog("> :shared:compileKotlinIosArm64 UP-TO-DATE")
-            delay(500)
-            appendLog("> :shared:compileKotlinAndroid SUCCESS [0.4s]")
-            delay(400)
-            appendLog("> :shared:linkReleaseFrameworkIos SUCCESS")
-            delay(600)
-            appendLog("> :androidApp:assembleDebug SUCCESS [1.2s]")
-            delay(400)
-            appendLog("> Syncing multiplatform project artifacts with device simulator...")
-            delay(500)
-            appendLog("> Launching application on simulated ${if (_emulatorPlatform.value == "android") "Android Pixel Fold" else "iOS iPhone Pro"} inside IDE split view...")
+            if (isFlutter) {
+                appendLog("> flutter run -d ${if (_emulatorPlatform.value == "android") "android-x64-emulator" else "ios-pro-simulator"}")
+                delay(600)
+                appendLog("Launching lib/main.dart on ${if (_emulatorPlatform.value == "android") "Android SDK Screen" else "iOS SDK Screen"} in debug mode...")
+                delay(500)
+                appendLog("✓ Running 'flutter pub get'...")
+                delay(600)
+                appendLog("Running Gradle task 'assembleDebug'...")
+                delay(500)
+                appendLog("✓ Built build/app/outputs/flutter-apk/app-debug.apk (18.6MB).")
+                delay(400)
+                appendLog("Installing app-debug.apk onto simulated mobile frame...")
+                delay(500)
+                appendLog("Syncing files to device via hot reload... Press \"r\" to reload.")
+            } else {
+                appendLog("> ./gradlew :app:assembleDebug")
+                delay(600)
+                appendLog("Starting a Gradle Daemon, 1 incompatible Daemon could not be reused... [0.2s]")
+                delay(500)
+                appendLog("> :app:preBuild UP-TO-DATE")
+                appendLog("> :app:preDebugBuild UP-TO-DATE")
+                delay(400)
+                appendLog("> :app:compileDebugKotlin SUCCESS [1.1s]")
+                delay(400)
+                appendLog("> :app:processDebugResources SUCCESS [0.3s]")
+                delay(300)
+                appendLog("> :app:assembleDebug SUCCESS [1.8s]")
+                delay(400)
+                appendLog("Launching ${active?.name ?: "AndroidApp"} on simulated ${if (_emulatorPlatform.value == "android") "Android Tablet" else "iOS Phone"} screen inside split chassis view...")
+            }
 
             _buildStatus.value = BuildStatus.Success
         }

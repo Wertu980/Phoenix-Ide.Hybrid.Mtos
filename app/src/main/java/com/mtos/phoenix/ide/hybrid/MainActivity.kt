@@ -15,7 +15,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import com.mtos.phoenix.ide.hybrid.data.AppDatabase
 import com.mtos.phoenix.ide.hybrid.data.WorkspaceRepository
 import com.mtos.phoenix.ide.hybrid.ui.HomeScreen
 import com.mtos.phoenix.ide.hybrid.ui.TemplateScreen
@@ -33,8 +32,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
 
-        val database = AppDatabase.getDatabase(applicationContext)
-        val repository = WorkspaceRepository(applicationContext, database.workspaceDao())
+        val repository = WorkspaceRepository(applicationContext)
         val factory = object : ViewModelProvider.Factory {
             @Suppress("UNCHECKED_CAST")
             override fun <T : ViewModel> create(modelClass: Class<T>): T {

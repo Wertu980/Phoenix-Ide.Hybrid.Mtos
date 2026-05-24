@@ -8,8 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import java.io.File
 
 class WorkspaceRepository(
-    private val context: Context,
-    private val workspaceDao: WorkspaceDao
+    private val context: Context
 ) {
 
     private val _allProjectsFlow = MutableStateFlow<List<Project>>(emptyList())
@@ -275,7 +274,7 @@ class WorkspaceRepository(
         return readSettings()[key]
     }
 
-    private fun copyAssetFolder(assetPath: String, targetFolder: File, replacements: Map<String, String>) {
+    private fun copyAssetFolder(assetPath: String, destinationDir: File, replacements: Map<String, String>) {
         val assets = try {
             context.assets.list(assetPath)
         } catch (e: Exception) {
@@ -294,30 +293,48 @@ class WorkspaceRepository(
                 val fileName = File(assetPath).name
                 val targetFile = if (fileName == "MainActivity.kt") {
                     val packageSubPath = replacements["__PACKAGE_NAME__"]?.replace('.', '/') ?: "com/example"
-                    File(targetFolder, "$packageSubPath/$fileName")
+                    File(destinationDir, "$packageSubPath/$fileName")
                 } else {
-                    File(targetFolder, fileName)
+                    File(destinationDir, fileName)
+                }
+                
+                if (targetFile.exists() && targetFile.isDirectory) {
+                    targetFile.deleteRecursively()
                 }
                 targetFile.parentFile?.mkdirs()
                 targetFile.writeText(updatedContent)
             } catch (e: Exception) {
-                targetFolder.mkdirs()
+                e.printStackTrace()
             }
         } else {
             // It is a directory
-            targetFolder.mkdirs()
+            val nextDestinationDir = if (assetPath == "templates/android" || assetPath == "templates/flutter") {
+                destinationDir
+            } else {
+                File(destinationDir, File(assetPath).name)
+            }
+            
+            if (nextDestinationDir.exists() && nextDestinationDir.isFile) {
+                nextDestinationDir.delete()
+            }
+            nextDestinationDir.mkdirs()
+            
             for (asset in assets) {
                 val childAssetPath = if (assetPath.isEmpty()) asset else "$assetPath/$asset"
-                val childTargetFolder = File(targetFolder, asset)
-                copyAssetFolder(childAssetPath, childTargetFolder, replacements)
+                copyAssetFolder(childAssetPath, nextDestinationDir, replacements)
             }
         }
     }
 
     private fun createTemplateFilesOnDisk(project: Project) {
         val rootDir = getProjectDir(project)
-        if (!rootDir.exists()) {
+        try {
+            if (rootDir.exists()) {
+                rootDir.deleteRecursively()
+            }
             rootDir.mkdirs()
+        } catch (e: Exception) {
+            e.printStackTrace()
         }
 
         val templateType = project.templateType
